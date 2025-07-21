@@ -133,13 +133,13 @@ fun PlayerScreen(
                                     } else {
                                         // Left swipe - go forward
                                         println("DEBUG: Left swipe detected, navigating forward")
-                                        val currentMediaItem = currentItems[pagerState.currentPage]
-                                        viewModel.setSelectedModel(currentMediaItem)
-                                        
-                                        if (isInQueueMode) {
-                                            onNavigateToCreator(currentMediaItem.creator)
-                                        } else {
-                                            onNavigateToDetail()
+                                    val currentMediaItem = currentItems[pagerState.currentPage]
+                                    viewModel.setSelectedModel(currentMediaItem)
+                                    
+                                    if (isInQueueMode) {
+                                        onNavigateToCreator(currentMediaItem.creator)
+                                    } else {
+                                        onNavigateToDetail()
                                         }
                                     }
                                 }

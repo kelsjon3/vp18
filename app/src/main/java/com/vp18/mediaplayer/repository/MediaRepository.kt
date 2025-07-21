@@ -454,49 +454,49 @@ class MediaRepository(private val context: Context) {
                         cursor = cursor,
                         limit = 20
                     )
-                    
-                    if (response.isSuccessful) {
-                        val responseBody = response.body()
-                        val models = responseBody?.items ?: emptyList()
-                        val nextCursor = responseBody?.metadata?.nextCursor
-                        
-                        // Convert to MediaItems
-                        val mediaItems = models.mapNotNull { model ->
-                            val firstImage = model.modelVersions.firstOrNull()?.images?.firstOrNull()
-                            if (firstImage != null) {
-                                MediaItem(
-                                    id = "${model.id}_${firstImage.id}",
-                                    title = model.name,
-                                    imageUrl = firstImage.url,
-                                    creator = model.creator.username,
-                                    type = model.type,
-                                    source = MediaSource(
-                                        id = "civitai_search",
-                                        name = "Search Results",
-                                        type = SourceType.CIVITAI
-                                    ),
-                                    model = model
-                                )
-                            } else null
-                        }
-                        
+            
+            if (response.isSuccessful) {
+                val responseBody = response.body()
+                val models = responseBody?.items ?: emptyList()
+                val nextCursor = responseBody?.metadata?.nextCursor
+                
+                // Convert to MediaItems
+                val mediaItems = models.mapNotNull { model ->
+                    val firstImage = model.modelVersions.firstOrNull()?.images?.firstOrNull()
+                    if (firstImage != null) {
+                        MediaItem(
+                            id = "${model.id}_${firstImage.id}",
+                            title = model.name,
+                            imageUrl = firstImage.url,
+                            creator = model.creator.username,
+                            type = model.type,
+                            source = MediaSource(
+                                id = "civitai_search",
+                                name = "Search Results",
+                                type = SourceType.CIVITAI
+                            ),
+                            model = model
+                        )
+                    } else null
+                }
+                
                         println("DEBUG: Found ${mediaItems.size} models for tag: $searchValue")
-                        Pair(mediaItems, nextCursor)
-                    } else {
+                Pair(mediaItems, nextCursor)
+            } else {
                         println("DEBUG: Tag search API error: ${response.code()} - ${response.message()}")
                         Pair(emptyList(), null)
-                    }
-                }
-                else -> {
+                        }
+                        }
+                        else -> {
                     println("DEBUG: Searching for general query: '$searchValue'")
                     // General search (model name/description) using /models endpoint
                     val response = civitaiApi.getModels(
                         authorization = apiKey?.let { "Bearer $it" },
-                        query = searchValue,
-                        nsfw = true,
-                        cursor = cursor,
-                        limit = 20
-                    )
+                                query = searchValue,
+                                nsfw = true,
+                                cursor = cursor,
+                                limit = 20
+                            )
                     
                     if (response.isSuccessful) {
                         val responseBody = response.body()
