@@ -367,108 +367,96 @@ class MediaRepository(private val context: Context) {
             
             println("DEBUG: Search type: $searchType, search value: '$searchValue'")
             
-            val response = when (searchType) {
+            when (searchType) {
                 "username" -> {
                     println("DEBUG: Searching for username (case-sensitive): '$searchValue'")
-                    // Search by username - requires exact case-sensitive match
-                    civitaiApi.getModels(
+                    // Search by username using /images endpoint to get all images by that user
+                    val response = civitaiApi.getImages(
                         authorization = apiKey?.let { "Bearer $it" },
                         username = searchValue,
-                        nsfw = true,
-                        cursor = cursor,
-                        limit = 20
+                        sort = "Newest",
+                        nsfw = true
                     )
+                    
+                    if (response.isSuccessful) {
+                        val responseBody = response.body()
+                        val images = responseBody?.items ?: emptyList()
+                        
+                        // Convert images to MediaItems
+                        val mediaItems = images.map { image ->
+                            MediaItem(
+                                id = "search_image_${image.id}",
+                                title = image.metadata?.prompt ?: "Image by $searchValue",
+                                imageUrl = image.url,
+                                creator = searchValue,
+                                type = "Image",
+                                source = MediaSource(
+                                    id = "civitai_search",
+                                    name = "Search Results",
+                                    type = SourceType.CIVITAI
+                                )
+                            )
+                        }
+                        
+                        println("DEBUG: Found ${mediaItems.size} images for username: $searchValue")
+                        Pair(mediaItems, null) // Images endpoint doesn't use cursor
+                    } else {
+                        println("DEBUG: Username search API error: ${response.code()} - ${response.message()}")
+                        
+                        // Add fallback mechanism for API key authentication
+                        if (apiKey != null && response.code() == 400) {
+                            println("DEBUG: Retrying username search with API key as query parameter...")
+                            val retryResponse = civitaiApi.getImagesWithApiKey(
+                                apiKey = apiKey,
+                                username = searchValue,
+                                sort = "Newest",
+                                nsfw = true
+                            )
+                            
+                            if (retryResponse.isSuccessful) {
+                                val responseBody = retryResponse.body()
+                                val images = responseBody?.items ?: emptyList()
+                                
+                                // Convert images to MediaItems
+                                val mediaItems = images.map { image ->
+                                    MediaItem(
+                                        id = "search_image_${image.id}",
+                                        title = image.metadata?.prompt ?: "Image by $searchValue",
+                                        imageUrl = image.url,
+                                        creator = searchValue,
+                                        type = "Image",
+                                        source = MediaSource(
+                                            id = "civitai_search",
+                                            name = "Search Results",
+                                            type = SourceType.CIVITAI
+                                        )
+                                    )
+                                }
+                                
+                                println("DEBUG: Retry username search found ${mediaItems.size} images for: $searchValue")
+                                Pair(mediaItems, null)
+                            } else {
+                                println("DEBUG: Username search retry also failed: ${retryResponse.code()}")
+                                Pair(emptyList(), null)
+                            }
+                        } else {
+                            Pair(emptyList(), null)
+                        }
+                    }
                 }
                 "tag" -> {
                     println("DEBUG: Searching for tag: '$searchValue'")
-                    // Search by tag
-                    civitaiApi.getModels(
+                    // Search by tag using /models endpoint
+                    val response = civitaiApi.getModels(
                         authorization = apiKey?.let { "Bearer $it" },
                         tag = searchValue,
                         nsfw = true,
                         cursor = cursor,
                         limit = 20
                     )
-                }
-                else -> {
-                    println("DEBUG: Searching for general query: '$searchValue'")
-                    // General search (model name/description)
-                    civitaiApi.getModels(
-                        authorization = apiKey?.let { "Bearer $it" },
-                        query = searchValue,
-                        nsfw = true,
-                        cursor = cursor,
-                        limit = 20
-                    )
-                }
-            }
-            
-            if (response.isSuccessful) {
-                val responseBody = response.body()
-                val models = responseBody?.items ?: emptyList()
-                val nextCursor = responseBody?.metadata?.nextCursor
-                
-                // Convert to MediaItems
-                val mediaItems = models.mapNotNull { model ->
-                    val firstImage = model.modelVersions.firstOrNull()?.images?.firstOrNull()
-                    if (firstImage != null) {
-                        MediaItem(
-                            id = "${model.id}_${firstImage.id}",
-                            title = model.name,
-                            imageUrl = firstImage.url,
-                            creator = model.creator.username,
-                            type = model.type,
-                            source = MediaSource(
-                                id = "civitai_search",
-                                name = "Search Results",
-                                type = SourceType.CIVITAI
-                            ),
-                            model = model
-                        )
-                    } else null
-                }
-                
-                println("DEBUG: Found ${mediaItems.size} search results for: $query, nextCursor: $nextCursor")
-                Pair(mediaItems, nextCursor)
-            } else {
-                println("DEBUG: Search API error: ${response.code()} - ${response.message()}")
-                println("DEBUG: Search response body: ${response.errorBody()?.string()}")
-                
-                // Add fallback mechanism like in getCivitaiModels()
-                if (apiKey != null && response.code() == 400) {
-                    println("DEBUG: Retrying search with API key as query parameter...")
-                    val retryResponse = when (searchType) {
-                        "username" -> {
-                            civitaiApi.getModelsWithApiKey(
-                                apiKey = apiKey,
-                                username = searchValue,
-                                nsfw = true,
-                                cursor = cursor,
-                                limit = 20
-                            )
-                        }
-                        "tag" -> {
-                            civitaiApi.getModelsWithApiKey(
-                                apiKey = apiKey,
-                                tag = searchValue,
-                                nsfw = true,
-                                cursor = cursor,
-                                limit = 20
-                            )
-                        }
-                        else -> {
-                            civitaiApi.getModelsWithApiKey(
-                                apiKey = apiKey,
-                                query = searchValue,
-                                nsfw = true,
-                                cursor = cursor,
-                                limit = 20
-                            )
-                        }
-                    }
                     
-                    if (retryResponse.isSuccessful) {
-                        val responseBody = retryResponse.body()
+                    if (response.isSuccessful) {
+                        val responseBody = response.body()
                         val models = responseBody?.items ?: emptyList()
                         val nextCursor = responseBody?.metadata?.nextCursor
                         
@@ -492,16 +480,59 @@ class MediaRepository(private val context: Context) {
                             } else null
                         }
                         
-                        println("DEBUG: Retry search found ${mediaItems.size} results for: $query")
+                        println("DEBUG: Found ${mediaItems.size} models for tag: $searchValue")
                         Pair(mediaItems, nextCursor)
                     } else {
-                        println("DEBUG: Search retry also failed: ${retryResponse.code()}")
+                        println("DEBUG: Tag search API error: ${response.code()} - ${response.message()}")
                         Pair(emptyList(), null)
                     }
-                } else {
-                Pair(emptyList(), null)
+                }
+                else -> {
+                    println("DEBUG: Searching for general query: '$searchValue'")
+                    // General search (model name/description) using /models endpoint
+                    val response = civitaiApi.getModels(
+                        authorization = apiKey?.let { "Bearer $it" },
+                        query = searchValue,
+                        nsfw = true,
+                        cursor = cursor,
+                        limit = 20
+                    )
+                    
+                    if (response.isSuccessful) {
+                        val responseBody = response.body()
+                        val models = responseBody?.items ?: emptyList()
+                        val nextCursor = responseBody?.metadata?.nextCursor
+                        
+                        // Convert to MediaItems
+                        val mediaItems = models.mapNotNull { model ->
+                            val firstImage = model.modelVersions.firstOrNull()?.images?.firstOrNull()
+                            if (firstImage != null) {
+                                MediaItem(
+                                    id = "${model.id}_${firstImage.id}",
+                                    title = model.name,
+                                    imageUrl = firstImage.url,
+                                    creator = model.creator.username,
+                                    type = model.type,
+                                    source = MediaSource(
+                                        id = "civitai_search",
+                                        name = "Search Results",
+                                        type = SourceType.CIVITAI
+                                    ),
+                                    model = model
+                                )
+                            } else null
+                        }
+                        
+                        println("DEBUG: Found ${mediaItems.size} models for query: $searchValue")
+                        Pair(mediaItems, nextCursor)
+                    } else {
+                        println("DEBUG: General search API error: ${response.code()} - ${response.message()}")
+                        Pair(emptyList(), null)
+                    }
                 }
             }
+            
+
         } catch (e: Exception) {
             println("DEBUG: Search exception: ${e.message}")
             e.printStackTrace()

@@ -46,6 +46,15 @@ interface CivitaiApi {
         @Query("nsfw") nsfw: Boolean = true
     ): Response<CivitaiImageResponse>
     
+    @GET("images")
+    suspend fun getImagesWithApiKey(
+        @Query("token") apiKey: String,
+        @Query("username") username: String? = null,
+        @Query("sort") sort: String? = null,
+        @Query("period") period: String? = null,
+        @Query("nsfw") nsfw: Boolean = true
+    ): Response<CivitaiImageResponse>
+    
     @GET("me")
     suspend fun getCurrentUser(
         @Header("Authorization") authorization: String

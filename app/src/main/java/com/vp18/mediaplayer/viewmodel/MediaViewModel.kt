@@ -189,6 +189,28 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
         _selectedModel.value = mediaItem
     }
     
+    fun setSearchResultsAsCurrentMedia(selectedMediaItem: MediaItem) {
+        val searchResults = _searchResults.value
+        if (searchResults.isNotEmpty()) {
+            // Set search results as current media items
+            _mediaItems.value = searchResults
+            
+            // Find the index of the selected item
+            val selectedIndex = searchResults.indexOfFirst { it.id == selectedMediaItem.id }
+            if (selectedIndex != -1) {
+                _currentMediaIndex.value = selectedIndex
+                println("DEBUG: Set search result as current media, index: $selectedIndex, title: ${selectedMediaItem.title}")
+            } else {
+                println("DEBUG: Selected media item not found in search results")
+                _currentMediaIndex.value = 0
+            }
+            
+            // Exit queue mode if we were in it
+            _isInQueueMode.value = false
+            _queuedItems.value = emptyList()
+        }
+    }
+    
     fun setQueueFromModel(selectedImage: MediaItem) {
         val model = selectedImage.model
         if (model != null) {

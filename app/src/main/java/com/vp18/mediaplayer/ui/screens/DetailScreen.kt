@@ -87,9 +87,9 @@ fun DetailScreen(
                                         }
                                     }
                                 }
-                                // Swipe right back to player
+                                // Swipe right back to previous screen
                                 totalDragX > 200 -> {
-                                    onNavigateToPlayer()
+                                    onNavigateBack()
                                 }
                             }
                         }

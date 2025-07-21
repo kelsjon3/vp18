@@ -14,6 +14,7 @@ import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.VerticalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
+
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -54,7 +55,8 @@ fun PlayerScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToDetail: () -> Unit,
     onNavigateToCreator: (String) -> Unit = {},
-    onNavigateToSearch: () -> Unit = {}
+    onNavigateToSearch: () -> Unit = {},
+    onNavigateBack: () -> Unit = {}
 ) {
     val mediaItems by viewModel.mediaItems.collectAsState()
     val queuedItems by viewModel.queuedItems.collectAsState()
@@ -111,29 +113,46 @@ fun PlayerScreen(
                     .fillMaxSize()
                     .pointerInput(Unit) {
                         var totalDragX = 0f
+                        var isHorizontalDrag = false
+                        
                         detectDragGestures(
                             onDragStart = {
                                 totalDragX = 0f
+                                isHorizontalDrag = false
+                                println("DEBUG: Drag started")
                             },
                             onDragEnd = {
-                                // Check if we have a significant left swipe
-                                if (totalDragX < -200) {
-                                    val currentMediaItem = currentItems[pagerState.currentPage]
-                                    viewModel.setSelectedModel(currentMediaItem)
-                                    
-                                    if (isInQueueMode) {
-                                        // Player Screen (Preview Images) -> Creator Detail
-                                        onNavigateToCreator(currentMediaItem.creator)
+                                println("DEBUG: Drag ended, totalDragX: $totalDragX")
+                                
+                                // Check for horizontal swipes (navigation)
+                                if (abs(totalDragX) > 200) {
+                                    if (totalDragX > 0) {
+                                        // Right swipe - go back
+                                        println("DEBUG: Right swipe detected, navigating back")
+                                        onNavigateBack()
                                     } else {
-                                        // Player Screen (Models) -> Model Detail
-                                        onNavigateToDetail()
+                                        // Left swipe - go forward
+                                        println("DEBUG: Left swipe detected, navigating forward")
+                                        val currentMediaItem = currentItems[pagerState.currentPage]
+                                        viewModel.setSelectedModel(currentMediaItem)
+                                        
+                                        if (isInQueueMode) {
+                                            onNavigateToCreator(currentMediaItem.creator)
+                                        } else {
+                                            onNavigateToDetail()
+                                        }
                                     }
                                 }
                             }
                         ) { change, dragAmount ->
                             // Only count horizontal drag when it's clearly horizontal
-                            if (abs(dragAmount.x) > abs(dragAmount.y) * 1.5) {
+                            if (abs(dragAmount.x) > abs(dragAmount.y) * 2) {
+                                if (!isHorizontalDrag) {
+                                    isHorizontalDrag = true
+                                    println("DEBUG: Horizontal drag started")
+                                }
                                 totalDragX += dragAmount.x
+                                println("DEBUG: Horizontal drag detected, dragAmount.x: ${dragAmount.x}, totalDragX: $totalDragX")
                                 change.consume()
                             }
                         }
@@ -149,7 +168,7 @@ fun PlayerScreen(
         Column(
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(16.dp),
+                .padding(top = 48.dp, end = 16.dp),
             horizontalAlignment = Alignment.End
         ) {
             IconButton(

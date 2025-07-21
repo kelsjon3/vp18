@@ -89,6 +89,9 @@ fun MediaPlayerApp() {
                 },
                 onNavigateToSearch = {
                     navController.navigate("search")
+                },
+                onNavigateBack = {
+                    navController.popBackStack()
                 }
             )
         }
@@ -140,9 +143,8 @@ fun MediaPlayerApp() {
                 },
                 onResultClick = { mediaItem ->
                     viewModel.setSelectedModel(mediaItem)
-                    navController.navigate("player") {
-                        popUpTo("search") { inclusive = true }
-                    }
+                    viewModel.setSearchResultsAsCurrentMedia(mediaItem)
+                    navController.navigate("player")
                 },
                 onNavigateBack = {
                     navController.popBackStack()
