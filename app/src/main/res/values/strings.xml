@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">VP18</string>
+    <string name="add_sources">Add Sources</string>
+    <string name="device_folder">Device Folder</string>
+    <string name="network_folder">Network Folder</string>
+    <string name="civitai">Civitai</string>
+    <string name="cancel">Cancel</string>
+    <string name="save">Save</string>
+    <string name="civitai_api_key">Civitai API Key</string>
+    <string name="enter_api_key">Enter your Civitai API key</string>
+    <string name="ok">OK</string>
+</resources>
