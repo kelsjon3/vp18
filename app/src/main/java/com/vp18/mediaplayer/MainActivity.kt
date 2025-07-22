@@ -129,30 +129,41 @@ fun MediaPlayerApp() {
             )
         }
         
-        composable("search") {
-            val searchResults by viewModel.searchResults.collectAsState()
-            val isSearching by viewModel.isSearching.collectAsState()
-            
-            SearchScreen(
-                searchQuery = "",
-                onSearchQueryChange = { /* Handle query change if needed */ },
-                searchResults = searchResults,
-                isSearching = isSearching,
-                onSearchSubmit = { query ->
-                    viewModel.searchContent(query)
-                },
-                onResultClick = { mediaItem ->
-                    viewModel.setSelectedModel(mediaItem)
-                    viewModel.setSearchResultsAsCurrentMedia(mediaItem)
-                    navController.navigate("player")
-                },
-                onNavigateBack = {
-                    navController.popBackStack()
-                },
-                onLoadMore = {
-                    viewModel.loadMoreSearchResults()
-                }
-            )
-        }
+                    composable("search") {
+                val searchResults by viewModel.searchResults.collectAsState()
+                val isSearching by viewModel.isSearching.collectAsState()
+                val followingUsers by viewModel.followingUsers.collectAsState()
+                val isLoadingFollowingUsers by viewModel.isLoadingFollowingUsers.collectAsState()
+                
+                SearchScreen(
+                    searchQuery = viewModel.currentSearchQuery.value,
+                    onSearchQueryChange = { viewModel.setSearchQuery(it) },
+                    searchResults = searchResults,
+                    isSearching = isSearching,
+                    onSearchSubmit = { query ->
+                        viewModel.searchContent(query)
+                    },
+                    onResultClick = { mediaItem ->
+                        viewModel.setSelectedModel(mediaItem)
+                        viewModel.setSearchResultsAsCurrentMedia(mediaItem)
+                        navController.navigate("player")
+                    },
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    },
+                    onLoadMore = {
+                        viewModel.loadMoreSearchResults()
+                    },
+                    onCreatorClick = { creatorName ->
+                        // Search for the creator and navigate to their gallery
+                        viewModel.searchContent("@$creatorName")
+                    },
+                    followingUsers = followingUsers,
+                    onLoadFollowingUsers = {
+                        viewModel.loadFollowingUsers()
+                    },
+                    isLoadingFollowingUsers = isLoadingFollowingUsers
+                )
+            }
     }
 }

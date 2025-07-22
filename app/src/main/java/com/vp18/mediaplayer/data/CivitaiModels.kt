@@ -90,5 +90,7 @@ data class MediaItem(
     val creator: String,
     val type: String,
     val source: MediaSource,
-    val model: CivitaiModel? = null
+    val model: CivitaiModel? = null,
+    val width: Int? = null,
+    val height: Int? = null
 )

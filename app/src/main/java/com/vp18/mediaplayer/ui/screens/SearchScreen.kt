@@ -22,6 +22,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.vp18.mediaplayer.data.MediaItem
+import com.vp18.mediaplayer.data.FollowingUser
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
+import com.vp18.mediaplayer.R
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,7 +39,11 @@ fun SearchScreen(
     onSearchSubmit: (String) -> Unit,
     onResultClick: (MediaItem) -> Unit,
     onNavigateBack: () -> Unit,
-    onLoadMore: () -> Unit = {}
+    onLoadMore: () -> Unit = {},
+    onCreatorClick: (String) -> Unit = {},
+    followingUsers: List<FollowingUser> = emptyList(),
+    onLoadFollowingUsers: () -> Unit = {},
+    isLoadingFollowingUsers: Boolean = false
 ) {
     var localQuery by remember { mutableStateOf(searchQuery) }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -44,14 +54,13 @@ fun SearchScreen(
             .statusBarsPadding()
             .padding(16.dp)
     ) {
-        // Search Bar
+        // Search bar
         OutlinedTextField(
             value = localQuery,
             onValueChange = { 
                 localQuery = it
                 onSearchQueryChange(it)
             },
-            modifier = Modifier.fillMaxWidth(),
             label = { Text("Search models, @username, or #tag") },
             leadingIcon = {
                 Icon(
@@ -83,36 +92,51 @@ fun SearchScreen(
                     }
                 }
             ),
+            modifier = Modifier.fillMaxWidth(),
             singleLine = true
         )
-        
+
         Spacer(modifier = Modifier.height(16.dp))
-        
-        // Search hints
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-                containerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
-        ) {
-            Column(
-                modifier = Modifier.padding(12.dp)
-            ) {
+
+        // Creators You Follow Section - show as regular results when loaded
+        if (searchResults.isEmpty() && localQuery.isEmpty()) {
+            if (followingUsers.isEmpty()) {
+                // Show simple clickable link when no data loaded
                 Text(
-                    text = "Search Tips:",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "Creators You Follow",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clickable { 
+                            println("DEBUG: Creators You Follow clicked!")
+                            onLoadFollowingUsers() 
+                        }
+                        .padding(vertical = 8.dp)
                 )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "• Type a model name or description\n• Use @username to search by creator (exact name required)\n• Use #tag to search by tag\n• Try: @Civitai, @stabilityai, or @runwayml",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            } else {
+                // Show the creators as regular search results
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(2),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val validUsers = followingUsers.filter { it.username != null }
+                    println("DEBUG: Total users: ${followingUsers.size}, Valid users: ${validUsers.size}")
+                    
+                    items(validUsers) { user ->
+                        println("DEBUG: Creating card for user: ${user.username}")
+                        CreatorCard(
+                            creatorName = user.username!!, // Safe to use !! since we filtered
+                            profilePicture = user.profilePicture?.let { 
+                                "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/${it.url}/width=450,optimized=true/${it.name}"
+                            },
+                            onClick = { onCreatorClick(user.username!!) }
+                        )
+                    }
+                }
             }
+            Spacer(modifier = Modifier.height(16.dp))
         }
-        
-        Spacer(modifier = Modifier.height(16.dp))
         
         // Results
         Box(
@@ -137,10 +161,27 @@ fun SearchScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(searchResults.size) { index ->
-                            val item = searchResults[index]
+                        items(
+                            items = searchResults,
+                            key = { it.id },
+                            span = { item ->
+                                // Check if this is a landscape image
+                                val isLandscape = item.width != null && item.height != null && 
+                                                 item.width > item.height
+                                
+                                if (isLandscape) {
+                                    GridItemSpan(2) // Landscape images span both columns
+                                } else {
+                                    GridItemSpan(1) // Portrait images use one column
+                                }
+                            }
+                        ) { item ->
+                            // Check if this is a landscape image
+                            val isLandscape = item.width != null && item.height != null && 
+                                             item.width > item.height
                             
                             // Trigger pagination when reaching the last few items
+                            val index = searchResults.indexOf(item)
                             if (index >= searchResults.size - 3) {
                                 LaunchedEffect(index) {
                                     onLoadMore()
@@ -149,7 +190,8 @@ fun SearchScreen(
                             
                             SearchResultCard(
                                 mediaItem = item,
-                                onClick = { onResultClick(item) }
+                                onClick = { onResultClick(item) },
+                                isLandscape = isLandscape
                             )
                         }
                         
@@ -181,13 +223,76 @@ fun SearchScreen(
     }
 }
 
+
+
 @Composable
-fun SearchResultCard(
-    mediaItem: MediaItem,
+fun CreatorCard(
+    creatorName: String,
+    profilePicture: String? = null,
     onClick: () -> Unit
 ) {
     Card(
         modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Profile picture or placeholder avatar
+            if (profilePicture != null) {
+                AsyncImage(
+                    model = profilePicture,
+                    contentDescription = "Profile picture of $creatorName",
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape),
+                    contentScale = ContentScale.Crop,
+                    error = null
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .background(
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
+                            shape = CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = creatorName.take(1).uppercase(),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+                text = "@$creatorName",
+                style = MaterialTheme.typography.bodyMedium,
+                textAlign = TextAlign.Center,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+@Composable
+fun SearchResultCard(
+    mediaItem: MediaItem,
+    onClick: () -> Unit,
+    isLandscape: Boolean = false,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
             .fillMaxWidth()
             .clickable { onClick() }
     ) {
@@ -197,7 +302,14 @@ fun SearchResultCard(
                 contentDescription = mediaItem.title,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(3f / 4f),
+                    .aspectRatio(
+                        if (isLandscape && mediaItem.width != null && mediaItem.height != null) {
+                            // Use natural aspect ratio for landscape images that span full width
+                            mediaItem.width.toFloat() / mediaItem.height.toFloat()
+                        } else {
+                            3f / 4f
+                        }
+                    ),
                 contentScale = ContentScale.Crop
             )
             

@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import com.vp18.mediaplayer.data.FollowingUser
 
 class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
     
@@ -52,6 +53,20 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
     private val _currentSearchQuery = MutableStateFlow<String>("")
     val currentSearchQuery: StateFlow<String> = _currentSearchQuery.asStateFlow()
     
+    // Search caching
+    private var searchResultsLastLoaded: Long = 0
+    private val searchResultsCacheTimeout = 2 * 60 * 1000L // 2 minutes
+    private var lastSearchQuery: String = ""
+
+    private val _followingUsers = MutableStateFlow<List<FollowingUser>>(emptyList())
+    val followingUsers: StateFlow<List<FollowingUser>> = _followingUsers.asStateFlow()
+    
+    private val _isLoadingFollowingUsers = MutableStateFlow(false)
+    val isLoadingFollowingUsers: StateFlow<Boolean> = _isLoadingFollowingUsers.asStateFlow()
+    
+    private var followingUsersLastLoaded: Long = 0
+    private val followingUsersCacheTimeout = 5 * 60 * 1000L // 5 minutes
+
     init {
         loadSources()
         loadCivitaiUsername()
@@ -287,19 +302,47 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
         }
     }
     
-    fun searchContent(query: String) {
+    fun searchContent(query: String, forceRefresh: Boolean = false) {
+        val now = System.currentTimeMillis()
+        val isSameQuery = query == lastSearchQuery
+        val shouldLoad = forceRefresh || 
+                        !isSameQuery || 
+                        _searchResults.value.isEmpty() || 
+                        (now - searchResultsLastLoaded) > searchResultsCacheTimeout
+        
+        if (!shouldLoad && isSameQuery) {
+            println("DEBUG: Using cached search results for '$query' (${_searchResults.value.size} results)")
+            return
+        }
+        
+        if (_isSearching.value && isSameQuery) {
+            println("DEBUG: Already searching for '$query', skipping duplicate call")
+            return
+        }
+        
         viewModelScope.launch {
             _isSearching.value = true
             _currentSearchQuery.value = query
-            _searchCursor.value = null // Reset cursor for new search
+            if (!isSameQuery) {
+                _searchCursor.value = null // Reset cursor for new search
+            }
             try {
-                val (results, nextCursor) = repository.searchCivitaiContent(query)
-                _searchResults.value = results
+                val (results, nextCursor) = repository.searchCivitaiContent(query, _searchCursor.value)
+                if (isSameQuery && !forceRefresh) {
+                    _searchResults.value = _searchResults.value + results
+                } else {
+                    _searchResults.value = results
+                }
                 _searchCursor.value = nextCursor
+                searchResultsLastLoaded = now
+                lastSearchQuery = query
+                println("DEBUG: Search completed for '$query': ${results.size} results")
             } catch (e: Exception) {
-                println("DEBUG: Search failed: ${e.message}")
-                _searchResults.value = emptyList()
-                _searchCursor.value = null
+                println("DEBUG: Search failed for '$query': ${e.message}")
+                if (!isSameQuery) {
+                    _searchResults.value = emptyList()
+                    _searchCursor.value = null
+                }
             } finally {
                 _isSearching.value = false
             }
@@ -324,5 +367,46 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
                 }
             }
         }
+    }
+
+    fun loadFollowingUsers(forceRefresh: Boolean = false) {
+        val now = System.currentTimeMillis()
+        val shouldLoad = forceRefresh || 
+                        _followingUsers.value.isEmpty() || 
+                        (now - followingUsersLastLoaded) > followingUsersCacheTimeout
+        
+        if (!shouldLoad) {
+            println("DEBUG: Using cached following users (${_followingUsers.value.size} users)")
+            return
+        }
+        
+        if (_isLoadingFollowingUsers.value) {
+            println("DEBUG: Already loading following users, skipping duplicate call")
+            return
+        }
+        
+        println("DEBUG: loadFollowingUsers() called, forceRefresh: $forceRefresh")
+        viewModelScope.launch {
+            _isLoadingFollowingUsers.value = true
+            try {
+                println("DEBUG: Starting to fetch following users...")
+                val users = repository.getFollowingUsers()
+                _followingUsers.value = users
+                followingUsersLastLoaded = now
+                println("DEBUG: Loaded ${users.size} followed users")
+            } catch (e: Exception) {
+                println("DEBUG: Error loading following users: ${e.message}")
+                e.printStackTrace()
+                if (_followingUsers.value.isEmpty()) {
+                    _followingUsers.value = emptyList()
+                }
+            } finally {
+                _isLoadingFollowingUsers.value = false
+            }
+        }
+    }
+
+    fun setSearchQuery(query: String) {
+        _currentSearchQuery.value = query
     }
 }

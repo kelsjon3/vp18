@@ -296,6 +296,11 @@ fun CreatorImageThumbnail(
 ) {
     val context = LocalContext.current
     val imageLoader = ImageLoader(context)
+    
+    // Check if this is a landscape image
+    val isLandscape = mediaItem.width != null && mediaItem.height != null && 
+                     mediaItem.width > mediaItem.height
+    
     Card(
         onClick = onClick,
         modifier = modifier,
@@ -309,7 +314,7 @@ fun CreatorImageThumbnail(
             contentDescription = mediaItem.title,
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(1f),
+                .aspectRatio(if (isLandscape) 4f / 3f else 1f),
             contentScale = ContentScale.Crop
         )
     }

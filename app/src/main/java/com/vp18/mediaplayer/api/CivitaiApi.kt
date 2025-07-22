@@ -3,6 +3,7 @@ package com.vp18.mediaplayer.api
 import com.vp18.mediaplayer.data.CivitaiResponse
 import com.vp18.mediaplayer.data.CivitaiImageResponse
 import com.vp18.mediaplayer.data.CivitaiUser
+import com.vp18.mediaplayer.data.FollowingUsersResponse
 import retrofit2.Response
 import retrofit2.http.GET
 import retrofit2.http.Header
@@ -59,4 +60,10 @@ interface CivitaiApi {
     suspend fun getCurrentUser(
         @Header("Authorization") authorization: String
     ): Response<CivitaiUser>
+
+    @GET("api/trpc/user.getFollowingUsers")
+    suspend fun getFollowingUsers(
+        @Query("input") input: String = """{"json":{"authed":true}}""",
+        @Header("Authorization") authorization: String? = null
+    ): Response<FollowingUsersResponse>
 }

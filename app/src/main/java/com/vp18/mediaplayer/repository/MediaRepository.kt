@@ -9,6 +9,8 @@ import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.vp18.mediaplayer.api.CivitaiApi
 import com.vp18.mediaplayer.data.CivitaiModel
+import com.vp18.mediaplayer.data.FollowingUser
+import com.vp18.mediaplayer.data.FollowingUsersResponse
 import com.vp18.mediaplayer.data.MediaItem
 import com.vp18.mediaplayer.data.MediaSource
 import com.vp18.mediaplayer.data.SourceType
@@ -25,6 +27,14 @@ class MediaRepository(private val context: Context) {
     private val civitaiApi: CivitaiApi by lazy {
         Retrofit.Builder()
             .baseUrl("https://civitai.com/api/v1/")
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+            .create(CivitaiApi::class.java)
+    }
+    
+    private val civitaiTrpcApi: CivitaiApi by lazy {
+        Retrofit.Builder()
+            .baseUrl("https://civitai.com/")
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(CivitaiApi::class.java)
@@ -394,7 +404,9 @@ class MediaRepository(private val context: Context) {
                                     id = "civitai_search",
                                     name = "Search Results",
                                     type = SourceType.CIVITAI
-                                )
+                                ),
+                                width = image.width,
+                                height = image.height
                             )
                         }
                         
@@ -429,7 +441,9 @@ class MediaRepository(private val context: Context) {
                                             id = "civitai_search",
                                             name = "Search Results",
                                             type = SourceType.CIVITAI
-                                        )
+                                        ),
+                                        width = image.width,
+                                        height = image.height
                                     )
                                 }
                                 
@@ -475,7 +489,9 @@ class MediaRepository(private val context: Context) {
                                 name = "Search Results",
                                 type = SourceType.CIVITAI
                             ),
-                            model = model
+                            model = model,
+                            width = firstImage.width,
+                            height = firstImage.height
                         )
                     } else null
                 }
@@ -518,7 +534,9 @@ class MediaRepository(private val context: Context) {
                                         name = "Search Results",
                                         type = SourceType.CIVITAI
                                     ),
-                                    model = model
+                                    model = model,
+                                    width = firstImage.width,
+                                    height = firstImage.height
                                 )
                             } else null
                         }
@@ -537,6 +555,34 @@ class MediaRepository(private val context: Context) {
             println("DEBUG: Search exception: ${e.message}")
             e.printStackTrace()
             Pair(emptyList(), null)
+        }
+    }
+
+    suspend fun getFollowingUsers(): List<FollowingUser> {
+        val apiKey = getCivitaiApiKey()
+        println("DEBUG: getFollowingUsers() called, apiKey: ${apiKey?.take(10)}...")
+        
+        return try {
+            println("DEBUG: Making API call to getFollowingUsers...")
+            val response = civitaiTrpcApi.getFollowingUsers(
+                authorization = apiKey?.let { "Bearer $it" }
+            )
+            println("DEBUG: API response code: ${response.code()}")
+            
+            if (response.isSuccessful) {
+                val responseBody = response.body()
+                val users = responseBody?.result?.data?.json ?: emptyList()
+                println("DEBUG: Successfully parsed ${users.size} users")
+                users
+            } else {
+                println("DEBUG: Failed to get following users: ${response.code()}")
+                println("DEBUG: Response body: ${response.errorBody()?.string()}")
+                emptyList()
+            }
+        } catch (e: Exception) {
+            println("DEBUG: Error getting following users: ${e.message}")
+            e.printStackTrace()
+            emptyList()
         }
     }
 }

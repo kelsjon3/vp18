@@ -9,8 +9,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Card
@@ -186,18 +188,28 @@ fun DetailContent(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                items(allImages) { image ->
+                itemsIndexed(allImages) { index, image ->
+                    // Check if this is a landscape image
+                    val isLandscape = image.width != null && image.height != null && 
+                                     image.width > image.height
+                    
                     ImageThumbnail(
                         mediaItem = image,
-                        onClick = { onImageClick(image) }
+                        onClick = { onImageClick(image) },
+                        isLandscape = isLandscape
                     )
                 }
             }
         } else {
+            // Check if this is a landscape image
+            val isLandscape = mediaItem.width != null && mediaItem.height != null && 
+                             mediaItem.width > mediaItem.height
+            
             ImageThumbnail(
                 mediaItem = mediaItem,
                 onClick = { onImageClick(mediaItem) },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.fillMaxWidth(),
+                isLandscape = isLandscape
             )
         }
     }
@@ -207,7 +219,8 @@ fun DetailContent(
 fun ImageThumbnail(
     mediaItem: MediaItem,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isLandscape: Boolean = false
 ) {
     val context = LocalContext.current
     val imageLoader = ImageLoader(context)
@@ -224,7 +237,7 @@ fun ImageThumbnail(
             contentDescription = mediaItem.title,
             modifier = Modifier
                 .fillMaxWidth()
-                .aspectRatio(1f),
+                .aspectRatio(if (isLandscape) 16f / 9f else 1f),
             contentScale = ContentScale.Crop
         )
     }

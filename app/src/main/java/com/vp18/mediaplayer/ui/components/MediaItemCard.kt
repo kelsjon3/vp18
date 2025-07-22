@@ -25,6 +25,10 @@ fun MediaItemCard(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Check if this is a landscape image
+    val isLandscape = mediaItem.width != null && mediaItem.height != null && 
+                     mediaItem.width > mediaItem.height
+    
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -38,7 +42,7 @@ fun MediaItemCard(
                 contentDescription = mediaItem.title,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(1f)
+                    .aspectRatio(if (isLandscape) 16f / 9f else 1f)
                     .clip(RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)),
                 contentScale = ContentScale.Crop
             )
