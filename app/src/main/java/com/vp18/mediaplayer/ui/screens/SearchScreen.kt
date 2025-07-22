@@ -23,9 +23,8 @@ import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
 import com.vp18.mediaplayer.data.MediaItem
 import com.vp18.mediaplayer.data.FollowingUser
-import androidx.compose.foundation.background
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.draw.clip
+import com.vp18.mediaplayer.ui.components.CreatorCard
+import com.vp18.mediaplayer.ui.components.SearchResultCard
 import androidx.compose.ui.res.painterResource
 import com.vp18.mediaplayer.R
 
@@ -34,16 +33,12 @@ import com.vp18.mediaplayer.R
 fun SearchScreen(
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
-    searchResults: List<MediaItem>,
-    isSearching: Boolean,
     onSearchSubmit: (String) -> Unit,
-    onResultClick: (MediaItem) -> Unit,
     onNavigateBack: () -> Unit,
-    onLoadMore: () -> Unit = {},
-    onCreatorClick: (String) -> Unit = {},
     followingUsers: List<FollowingUser> = emptyList(),
     onLoadFollowingUsers: () -> Unit = {},
-    isLoadingFollowingUsers: Boolean = false
+    isLoadingFollowingUsers: Boolean = false,
+    onNavigateToResults: (String) -> Unit = {}
 ) {
     var localQuery by remember { mutableStateOf(searchQuery) }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -88,6 +83,7 @@ fun SearchScreen(
                 onSearch = {
                     if (localQuery.isNotEmpty()) {
                         onSearchSubmit(localQuery)
+                        onNavigateToResults(localQuery)
                         keyboardController?.hide()
                     }
                 }
@@ -98,8 +94,8 @@ fun SearchScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Creators You Follow Section - show as regular results when loaded
-        if (searchResults.isEmpty() && localQuery.isEmpty()) {
+        // Creators You Follow Section
+        if (localQuery.isEmpty()) {
             if (followingUsers.isEmpty()) {
                 // Show simple clickable link when no data loaded
                 Text(
@@ -109,7 +105,8 @@ fun SearchScreen(
                     modifier = Modifier
                         .clickable { 
                             println("DEBUG: Creators You Follow clicked!")
-                            onLoadFollowingUsers() 
+                            onLoadFollowingUsers()
+                            onNavigateToResults("") // Navigate to results with empty query for "Creators You Follow"
                         }
                         .padding(vertical = 8.dp)
                 )
@@ -130,210 +127,23 @@ fun SearchScreen(
                             profilePicture = user.profilePicture?.let { 
                                 "https://image.civitai.com/xG1nkqKTMzGDvpLrqFT7WA/${it.url}/width=450,optimized=true/${it.name}"
                             },
-                            onClick = { onCreatorClick(user.username!!) }
+                            onClick = { 
+                                onNavigateToResults("@${user.username!!}") // Navigate to results with creator search
+                            }
                         )
                     }
                 }
             }
             Spacer(modifier = Modifier.height(16.dp))
-        }
-        
-        // Results
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
-        ) {
-            when {
-                isSearching -> {
-                    CircularProgressIndicator()
-                }
-                searchResults.isEmpty() && localQuery.isNotEmpty() -> {
-                    Text(
-                        text = "No results found for \"$localQuery\"",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
-                }
-                searchResults.isNotEmpty() -> {
-                    LazyVerticalGrid(
-                        columns = GridCells.Fixed(2),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(
-                            items = searchResults,
-                            key = { it.id },
-                            span = { item ->
-                                // Check if this is a landscape image
-                                val isLandscape = item.width != null && item.height != null && 
-                                                 item.width > item.height
-                                
-                                if (isLandscape) {
-                                    GridItemSpan(2) // Landscape images span both columns
-                                } else {
-                                    GridItemSpan(1) // Portrait images use one column
-                                }
-                            }
-                        ) { item ->
-                            // Check if this is a landscape image
-                            val isLandscape = item.width != null && item.height != null && 
-                                             item.width > item.height
-                            
-                            // Trigger pagination when reaching the last few items
-                            val index = searchResults.indexOf(item)
-                            if (index >= searchResults.size - 3) {
-                                LaunchedEffect(index) {
-                                    onLoadMore()
-                                }
-                            }
-                            
-                            SearchResultCard(
-                                mediaItem = item,
-                                onClick = { onResultClick(item) },
-                                isLandscape = isLandscape
-                            )
-                        }
-                        
-                        // Show loading indicator if searching for more results
-                        if (isSearching && searchResults.isNotEmpty()) {
-                            item(span = { GridItemSpan(2) }) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator()
-                                }
-                            }
-                        }
-                    }
-                }
-                else -> {
-                    Text(
-                        text = "Enter a search term to find models",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        }
-    }
-}
-
-
-
-@Composable
-fun CreatorCard(
-    creatorName: String,
-    profilePicture: String? = null,
-    onClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() },
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
-        )
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // Profile picture or placeholder avatar
-            if (profilePicture != null) {
-                AsyncImage(
-                    model = profilePicture,
-                    contentDescription = "Profile picture of $creatorName",
-                    modifier = Modifier
-                        .size(48.dp)
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop,
-                    error = null
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.1f),
-                            shape = CircleShape
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = creatorName.take(1).uppercase(),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
+        } else {
+            // Show search prompt when query is entered
             Text(
-                text = "@$creatorName",
-                style = MaterialTheme.typography.bodyMedium,
+                text = "Press search to find models, @username, or #tag",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
-                maxLines = 1
+                modifier = Modifier.padding(vertical = 16.dp)
             )
-        }
-    }
-}
-
-@Composable
-fun SearchResultCard(
-    mediaItem: MediaItem,
-    onClick: () -> Unit,
-    isLandscape: Boolean = false,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier = modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-    ) {
-        Column {
-            AsyncImage(
-                model = mediaItem.imageUrl,
-                contentDescription = mediaItem.title,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(
-                        if (isLandscape && mediaItem.width != null && mediaItem.height != null) {
-                            // Use natural aspect ratio for landscape images that span full width
-                            mediaItem.width.toFloat() / mediaItem.height.toFloat()
-                        } else {
-                            3f / 4f
-                        }
-                    ),
-                contentScale = ContentScale.Crop
-            )
-            
-            Column(
-                modifier = Modifier.padding(8.dp)
-            ) {
-                Text(
-                    text = mediaItem.title,
-                    style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 2
-                )
-                
-                Text(
-                    text = "by ${mediaItem.creator}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                
-                Text(
-                    text = mediaItem.type,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
         }
     }
 }

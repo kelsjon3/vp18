@@ -409,4 +409,11 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
     fun setSearchQuery(query: String) {
         _currentSearchQuery.value = query
     }
+    
+    fun clearSearchResults() {
+        _searchResults.value = emptyList()
+        _searchCursor.value = null
+        lastSearchQuery = ""
+        searchResultsLastLoaded = 0
+    }
 }

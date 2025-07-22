@@ -21,6 +21,7 @@ import com.vp18.mediaplayer.ui.screens.CreatorScreen
 import com.vp18.mediaplayer.ui.screens.DetailScreen
 import com.vp18.mediaplayer.ui.screens.PlayerScreen
 import com.vp18.mediaplayer.ui.screens.SearchScreen
+import com.vp18.mediaplayer.ui.screens.SearchResultsScreen
 import com.vp18.mediaplayer.ui.screens.SettingsScreen
 import com.vp18.mediaplayer.ui.theme.VP18Theme
 import com.vp18.mediaplayer.viewmodel.MediaViewModel
@@ -130,19 +131,50 @@ fun MediaPlayerApp() {
         }
         
                     composable("search") {
-                val searchResults by viewModel.searchResults.collectAsState()
-                val isSearching by viewModel.isSearching.collectAsState()
                 val followingUsers by viewModel.followingUsers.collectAsState()
                 val isLoadingFollowingUsers by viewModel.isLoadingFollowingUsers.collectAsState()
                 
                 SearchScreen(
                     searchQuery = viewModel.currentSearchQuery.value,
                     onSearchQueryChange = { viewModel.setSearchQuery(it) },
-                    searchResults = searchResults,
-                    isSearching = isSearching,
                     onSearchSubmit = { query ->
                         viewModel.searchContent(query)
                     },
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    },
+                    followingUsers = followingUsers,
+                    onLoadFollowingUsers = {
+                        viewModel.loadFollowingUsers()
+                    },
+                    isLoadingFollowingUsers = isLoadingFollowingUsers,
+                    onNavigateToResults = { query ->
+                        // Clear previous results when navigating to a new search
+                        if (query.isNotEmpty()) {
+                            viewModel.clearSearchResults()
+                        }
+                        navController.navigate("searchResults/$query")
+                    }
+                )
+            }
+            
+            composable("searchResults/{query}") { backStackEntry ->
+                val query = backStackEntry.arguments?.getString("query") ?: ""
+                val searchResults by viewModel.searchResults.collectAsState()
+                val isSearching by viewModel.isSearching.collectAsState()
+                val followingUsers by viewModel.followingUsers.collectAsState()
+                
+                // Trigger search when this screen is created with a query
+                LaunchedEffect(query) {
+                    if (query.isNotEmpty()) {
+                        viewModel.searchContent(query, forceRefresh = false)
+                    }
+                }
+                
+                SearchResultsScreen(
+                    searchQuery = query,
+                    searchResults = searchResults,
+                    isSearching = isSearching,
                     onResultClick = { mediaItem ->
                         viewModel.setSelectedModel(mediaItem)
                         viewModel.setSearchResultsAsCurrentMedia(mediaItem)
@@ -156,13 +188,22 @@ fun MediaPlayerApp() {
                     },
                     onCreatorClick = { creatorName ->
                         // Search for the creator and navigate to their gallery
-                        viewModel.searchContent("@$creatorName")
+                        // Clear previous results and navigate - search will be triggered by LaunchedEffect
+                        viewModel.clearSearchResults()
+                        navController.navigate("searchResults/@$creatorName") {
+                            popUpTo("searchResults/{query}") { inclusive = true }
+                        }
                     },
                     followingUsers = followingUsers,
-                    onLoadFollowingUsers = {
-                        viewModel.loadFollowingUsers()
+                    onSearchQueryChange = { newQuery ->
+                        viewModel.setSearchQuery(newQuery)
                     },
-                    isLoadingFollowingUsers = isLoadingFollowingUsers
+                    onSearchSubmit = { newQuery ->
+                        viewModel.searchContent(newQuery)
+                        navController.navigate("searchResults/$newQuery") {
+                            popUpTo("searchResults/{query}") { inclusive = true }
+                        }
+                    }
                 )
             }
     }
