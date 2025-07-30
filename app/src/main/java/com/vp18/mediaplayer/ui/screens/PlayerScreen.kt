@@ -45,6 +45,7 @@ import coil3.compose.AsyncImage
 import coil3.ImageLoader
 import com.vp18.mediaplayer.data.MediaItem
 import com.vp18.mediaplayer.viewmodel.MediaViewModel
+import com.vp18.mediaplayer.ui.components.VideoPlayer
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -248,13 +249,20 @@ fun MediaItemView(
     Box(
         modifier = modifier
     ) {
-        AsyncImage(
-            model = mediaItem.imageUrl,
-            imageLoader = imageLoader,
-            contentDescription = mediaItem.title,
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
+        if (mediaItem.isVideo) {
+            VideoPlayer(
+                videoUrl = mediaItem.videoUrl ?: mediaItem.imageUrl,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            AsyncImage(
+                model = mediaItem.imageUrl,
+                imageLoader = imageLoader,
+                contentDescription = mediaItem.title,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+        }
         
         MediaItemOverlay(
             mediaItem = mediaItem,

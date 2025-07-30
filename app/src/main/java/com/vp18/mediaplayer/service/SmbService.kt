@@ -1,9 +1,9 @@
 package com.vp18.mediaplayer.service
 
-import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.msfscc.fileinformation.FileIdBothDirectoryInformation
-import com.hierynomus.mssmb2.SMB2CreateDisposition
 import com.hierynomus.mssmb2.SMB2ShareAccess
+import com.hierynomus.mssmb2.SMB2CreateDisposition
+import com.hierynomus.msdtyp.AccessMask
 import com.hierynomus.protocol.commons.EnumWithValue
 import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.auth.AuthenticationContext
@@ -19,6 +19,7 @@ import java.io.Closeable
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
+import java.util.EnumSet
 
 data class SmbFolderItem(
     val name: String,
@@ -241,18 +242,24 @@ class SmbService(private val context: Context? = null) : Closeable {
                 if (isMediaFile(file.fileName)) {
                     val filePath = if (folderPath.isEmpty()) file.fileName else "$folderPath/${file.fileName}"
                     val smbUrl = "smb://${mediaSource.host}/$shareName/$filePath"
-                    val cachedUrl = getCachedFileUrl(smbUrl, file.fileName)
                     
-                    mediaItems.add(
-                        MediaItem(
-                            id = "smb_${mediaSource.id}_${filePath.replace("/", "_")}",
-                            title = file.fileName,
-                            imageUrl = cachedUrl ?: smbUrl, // Use cached URL if available, otherwise SMB URL as fallback
-                            creator = "Network",
-                            type = getFileType(file.fileName),
-                            source = mediaSource
-                        )
+                    // Download and cache the file, or use existing cache
+                    val cachedUrl = downloadAndCacheFile(smbUrl, filePath)
+                    
+                    println("DEBUG: File: ${file.fileName}, Cached URL: $cachedUrl")
+                    
+                    val isVideo = getFileType(file.fileName) == "Video"
+                    val mediaItem = MediaItem(
+                        id = "smb_${mediaSource.id}_${filePath.replace("/", "_")}",
+                        title = file.fileName,
+                        imageUrl = if (isVideo) "https://via.placeholder.com/400x600/cccccc/666666?text=Video+Thumbnail" else (cachedUrl ?: "https://via.placeholder.com/400x600/cccccc/666666?text=Image+Not+Available"),
+                        videoUrl = if (isVideo) cachedUrl else null,
+                        creator = "Network",
+                        type = getFileType(file.fileName),
+                        source = mediaSource
                     )
+                    
+                    mediaItems.add(mediaItem)
                 }
             }
         } catch (e: Exception) {
@@ -286,18 +293,24 @@ class SmbService(private val context: Context? = null) : Closeable {
                     val selectedPath = mediaSource.path ?: ""
                     val shareName = selectedPath.split("/").firstOrNull() ?: ""
                     val smbUrl = "smb://${mediaSource.host}/$shareName/$filePath"
-                    val cachedUrl = getCachedFileUrl(smbUrl, file.fileName)
                     
-                    mediaItems.add(
-                        MediaItem(
-                            id = "smb_${mediaSource.id}_${filePath.replace("/", "_")}",
-                            title = file.fileName,
-                            imageUrl = cachedUrl ?: smbUrl, // Use cached URL if available, otherwise SMB URL as fallback
-                            creator = "Network",
-                            type = getFileType(file.fileName),
-                            source = mediaSource
-                        )
+                    // Download and cache the file, or use existing cache
+                    val cachedUrl = downloadAndCacheFile(smbUrl, filePath)
+                    
+                    println("DEBUG: File: ${file.fileName}, Cached URL: $cachedUrl")
+                    
+                    val isVideo = getFileType(file.fileName) == "Video"
+                    val mediaItem = MediaItem(
+                        id = "smb_${mediaSource.id}_${filePath.replace("/", "_")}",
+                        title = file.fileName,
+                        imageUrl = if (isVideo) "https://via.placeholder.com/400x600/cccccc/666666?text=Video+Thumbnail" else (cachedUrl ?: "https://via.placeholder.com/400x600/cccccc/666666?text=Image+Not+Available"),
+                        videoUrl = if (isVideo) cachedUrl else null,
+                        creator = "Network",
+                        type = getFileType(file.fileName),
+                        source = mediaSource
                     )
+                    
+                    mediaItems.add(mediaItem)
                 }
             }
         } catch (e: Exception) {
@@ -338,29 +351,72 @@ class SmbService(private val context: Context? = null) : Closeable {
         }
     }
     
-    private fun getCachedFileUrl(smbUrl: String, fileName: String): String? {
-        val appContext = context ?: return null
-        
-        // Create a unique cache filename based on SMB URL hash
-        val urlHash = smbUrl.hashCode().toString()
-        val extension = fileName.substringAfterLast('.', "")
-        val cacheFileName = "${urlHash}.${extension}"
-        
-        val cacheDir = File(appContext.cacheDir, "smb_cache")
-        val cachedFile = File(cacheDir, cacheFileName)
-        
-        return if (cachedFile.exists()) {
-            "file://${cachedFile.absolutePath}"
-        } else {
+    private suspend fun downloadAndCacheFile(smbUrl: String, filePath: String): String? = withContext(Dispatchers.IO) {
+        try {
+            println("DEBUG: Starting download for: $filePath")
+            println("DEBUG: SMB URL: $smbUrl")
+
+            val androidContext = context ?: return@withContext null
+
+            // Create cache directory
+            val cacheDir = File(androidContext.cacheDir, "smb_cache")
+            if (!cacheDir.exists()) {
+                cacheDir.mkdirs()
+                println("DEBUG: Created cache directory: ${cacheDir.absolutePath}")
+            }
+
+            // Create unique filename based on SMB URL
+            val fileName = filePath.replace("/", "_").replace("\\", "_")
+            val cacheFile = File(cacheDir, "smb_$fileName")
+
+            println("DEBUG: Cache file path: ${cacheFile.absolutePath}")
+
+            // Check if file is already cached and not too old (24 hours)
+            if (cacheFile.exists() && (System.currentTimeMillis() - cacheFile.lastModified()) < 24 * 60 * 60 * 1000) {
+                println("DEBUG: Using cached file: ${cacheFile.absolutePath}")
+                return@withContext "file://${cacheFile.absolutePath}"
+            }
+
+            // Download file from SMB
+            val currentShare = share ?: return@withContext null
+
+            // Extract share name and file path from SMB URL
+            val urlParts = smbUrl.removePrefix("smb://").split("/")
+            if (urlParts.size < 3) {
+                println("DEBUG: Invalid SMB URL format: $smbUrl")
+                return@withContext null
+            }
+
+            val shareName = urlParts[1]
+            val smbFilePath = urlParts.drop(2).joinToString("/")
+
+            println("DEBUG: Downloading from SMB: share=$shareName, path=$smbFilePath")
+
+            // Open and download the file using proper access control parameters
+            val accessMasks = setOf(AccessMask.FILE_READ_DATA)
+            val shareAccesses = setOf(SMB2ShareAccess.FILE_SHARE_READ)
+            val createDisposition = SMB2CreateDisposition.FILE_OPEN
+            
+            val smbFile = currentShare.openFile(smbFilePath, accessMasks, null, shareAccesses, createDisposition, null)
+            val inputStream = smbFile.inputStream
+            val outputStream = FileOutputStream(cacheFile)
+
+            println("DEBUG: Starting file transfer...")
+
+            inputStream.use { input ->
+                outputStream.use { output ->
+                    input.copyTo(output)
+                }
+            }
+
+            println("DEBUG: Successfully downloaded to: ${cacheFile.absolutePath}")
+            "file://${cacheFile.absolutePath}"
+
+        } catch (e: Exception) {
+            println("DEBUG: Failed to download file $filePath: ${e.message}")
+            e.printStackTrace()
             null
         }
-    }
-    
-    suspend fun downloadAndCacheFile(smbUrl: String, filePath: String): String? = withContext(Dispatchers.IO) {
-        // TODO: Implement file caching in future version
-        // For now, just return the SMB URL as fallback
-        println("DEBUG: Cache download not implemented yet for: $filePath")
-        null
     }
 
     override fun close() {

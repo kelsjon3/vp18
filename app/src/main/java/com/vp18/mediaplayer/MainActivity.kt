@@ -54,16 +54,15 @@ fun MediaPlayerApp() {
     val sources by viewModel.sources.collectAsState()
     
     LaunchedEffect(sources) {
-        if (sources.isEmpty() && navController.currentDestination?.route != "settings") {
-            navController.navigate("settings") {
-                popUpTo(navController.graph.startDestinationId) { inclusive = true }
-            }
+        if (sources.isEmpty()) {
+            // Add default Civitai source if no sources exist
+            viewModel.addDefaultCivitaiSource()
         }
     }
     
     NavHost(
         navController = navController,
-        startDestination = "settings"
+        startDestination = "player"
     ) {
         composable("settings") {
             SettingsScreen(
@@ -133,9 +132,10 @@ fun MediaPlayerApp() {
                     composable("search") {
                 val followingUsers by viewModel.followingUsers.collectAsState()
                 val isLoadingFollowingUsers by viewModel.isLoadingFollowingUsers.collectAsState()
+                val currentSearchQuery by viewModel.currentSearchQuery.collectAsState()
                 
                 SearchScreen(
-                    searchQuery = viewModel.currentSearchQuery.value,
+                    searchQuery = currentSearchQuery,
                     onSearchQueryChange = { viewModel.setSearchQuery(it) },
                     onSearchSubmit = { query ->
                         viewModel.searchContent(query)

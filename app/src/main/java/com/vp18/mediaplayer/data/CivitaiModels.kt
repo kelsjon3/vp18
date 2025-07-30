@@ -87,10 +87,14 @@ data class MediaItem(
     val id: String,
     val title: String,
     val imageUrl: String,
+    val videoUrl: String? = null,
     val creator: String,
     val type: String,
     val source: MediaSource,
     val model: CivitaiModel? = null,
     val width: Int? = null,
     val height: Int? = null
-)
+) {
+    val isVideo: Boolean
+        get() = type == "Video" || videoUrl != null
+}

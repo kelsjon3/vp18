@@ -119,6 +119,17 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
         }
     }
     
+    fun addDefaultCivitaiSource() {
+        viewModelScope.launch {
+            val civitaiSource = MediaSource(
+                id = "civitai",
+                name = "Civitai",
+                type = SourceType.CIVITAI
+            )
+            repository.addSource(civitaiSource)
+        }
+    }
+    
     fun addDeviceFolder() {
         viewModelScope.launch {
             val deviceSource = MediaSource(
