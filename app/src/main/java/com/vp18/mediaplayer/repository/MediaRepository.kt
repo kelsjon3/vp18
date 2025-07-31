@@ -188,6 +188,24 @@ class MediaRepository(private val context: Context) {
         }
     }
     
+    suspend fun updateSource(updatedSource: MediaSource) {
+        // For updates, we need to remove the old source and add the new one
+        // The original source id contains the old sourceString
+        val oldSourceString = updatedSource.id
+        val newSourceString = "${updatedSource.type.name}:${updatedSource.name}:${updatedSource.path ?: ""}:${updatedSource.includeSubfolders}"
+        
+        context.dataStore.edit { preferences ->
+            val currentSources = preferences[SOURCES] ?: emptySet()
+            // Remove old sourceString and add new one
+            preferences[SOURCES] = (currentSources - oldSourceString) + newSourceString
+        }
+        
+        // For network folders, also remove old credentials entry
+        if (updatedSource.type == SourceType.NETWORK_FOLDER) {
+            removeSmbCredentials(oldSourceString)
+        }
+    }
+    
     suspend fun getCivitaiCreatorContent(creatorName: String): List<MediaItem> {
         val apiKey = getCivitaiApiKey()
         
@@ -360,6 +378,42 @@ class MediaRepository(private val context: Context) {
     
     fun clearSmbCache() {
         SmbService.clearSmbCache(context)
+    }
+    
+    /**
+     * Pre-cache an image for smoother scrolling
+     */
+    suspend fun preCacheImage(imageUrl: String) {
+        if (imageUrl.startsWith("smb-cache://")) {
+            val smbService = SmbService(context)
+            try {
+                smbService.cacheFileOnDemand(imageUrl)
+            } catch (e: Exception) {
+                println("DEBUG: Pre-cache failed: ${e.message}")
+            } finally {
+                smbService.close()
+            }
+        }
+    }
+    
+    /**
+     * Cache a file on-demand (for videos or large images)
+     */
+    suspend fun cacheFileOnDemand(fileUrl: String): String? {
+        return if (fileUrl.startsWith("smb-cache://")) {
+            val smbService = SmbService(context)
+            try {
+                smbService.cacheFileOnDemand(fileUrl)
+            } catch (e: Exception) {
+                println("DEBUG: Cache file on-demand failed: ${e.message}")
+                null
+            } finally {
+                smbService.close()
+            }
+        } else {
+            // Return as-is for non-SMB URLs
+            fileUrl
+        }
     }
     
     suspend fun searchCivitaiContent(query: String, cursor: String? = null): Pair<List<MediaItem>, String?> {

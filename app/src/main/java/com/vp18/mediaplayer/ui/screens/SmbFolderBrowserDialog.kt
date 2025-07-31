@@ -42,8 +42,12 @@ fun SmbFolderBrowserDialog(
             try {
                 // Connect to server without specifying a share
                 if (smbService.connect(mediaSource, connectToShare = false)) {
-                    val items = smbService.listFolders(mediaSource, currentPath)
+                    // Start by showing available shares instead of trying to list folders
+                    val items = smbService.listShares()
                     folderItems = items
+                    currentShare = null // Ensure we're in shares mode
+                    currentPath = ""
+                    println("DEBUG: SmbFolderBrowserDialog loaded ${items.size} shares")
                 } else {
                     connectionError = "Failed to connect to SMB server"
                 }

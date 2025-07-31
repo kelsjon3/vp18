@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -67,8 +68,10 @@ fun SettingsScreen(
     var showCivitaiDialog by remember { mutableStateOf(false) }
     var civitaiApiKey by remember { mutableStateOf("") }
     var sourceToDelete by remember { mutableStateOf<MediaSource?>(null) }
+    var sourceToEdit by remember { mutableStateOf<MediaSource?>(null) }
     
     var showNetworkDialog by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
     var showFolderBrowser by remember { mutableStateOf(false) }
     var networkName by remember { mutableStateOf("") }
     var networkHost by remember { mutableStateOf("") }
@@ -77,6 +80,15 @@ fun SettingsScreen(
     var networkPassword by remember { mutableStateOf("") }
     var networkDomain by remember { mutableStateOf("") }
     var includeSubfolders by remember { mutableStateOf(false) }
+    
+    // Edit dialog state variables
+    var editNetworkName by remember { mutableStateOf("") }
+    var editNetworkHost by remember { mutableStateOf("") }
+    var editNetworkPath by remember { mutableStateOf("") }
+    var editNetworkUsername by remember { mutableStateOf("") }
+    var editNetworkPassword by remember { mutableStateOf("") }
+    var editNetworkDomain by remember { mutableStateOf("") }
+    var editIncludeSubfolders by remember { mutableStateOf(false) }
     
     Scaffold(
         topBar = {
@@ -145,6 +157,20 @@ fun SettingsScreen(
                         SourceItem(
                             source = source,
                             civitaiUsername = civitaiUsername,
+                            onEdit = { 
+                                if (source.type == SourceType.NETWORK_FOLDER) {
+                                    sourceToEdit = source
+                                    // Pre-fill edit dialog with current values
+                                    editNetworkName = source.name
+                                    editNetworkHost = source.host ?: ""
+                                    editNetworkPath = source.path ?: ""
+                                    editNetworkUsername = source.username ?: ""
+                                    editNetworkPassword = source.password ?: ""
+                                    editNetworkDomain = source.domain ?: ""
+                                    editIncludeSubfolders = source.includeSubfolders
+                                    showEditDialog = true
+                                }
+                            },
                             onRemove = { sourceToDelete = source }
                         )
                     }
@@ -359,25 +385,37 @@ fun SettingsScreen(
         )
     }
     
-    if (showFolderBrowser && networkHost.isNotBlank()) {
-        SmbFolderBrowserDialog(
-            mediaSource = MediaSource(
-                id = "temp",
-                name = "temp", 
-                type = SourceType.NETWORK_FOLDER,
-                host = networkHost,
-                username = networkUsername,
-                password = networkPassword,
-                domain = networkDomain
-            ),
-            onFolderSelected = { selectedPath ->
-                networkPath = selectedPath
-                showFolderBrowser = false
-            },
-            onDismiss = {
-                showFolderBrowser = false
-            }
-        )
+    if (showFolderBrowser) {
+        // Use edit mode values if in edit dialog, otherwise use add mode values
+        val hostToUse = if (showEditDialog) editNetworkHost else networkHost
+        val usernameToUse = if (showEditDialog) editNetworkUsername else networkUsername
+        val passwordToUse = if (showEditDialog) editNetworkPassword else networkPassword
+        val domainToUse = if (showEditDialog) editNetworkDomain else networkDomain
+        
+        if (hostToUse.isNotBlank()) {
+            SmbFolderBrowserDialog(
+                mediaSource = MediaSource(
+                    id = "temp",
+                    name = "temp", 
+                    type = SourceType.NETWORK_FOLDER,
+                    host = hostToUse,
+                    username = usernameToUse,
+                    password = passwordToUse,
+                    domain = domainToUse
+                ),
+                onFolderSelected = { selectedPath ->
+                    if (showEditDialog) {
+                        editNetworkPath = selectedPath
+                    } else {
+                        networkPath = selectedPath
+                    }
+                    showFolderBrowser = false
+                },
+                onDismiss = {
+                    showFolderBrowser = false
+                }
+            )
+        }
     }
     
     sourceToDelete?.let { source ->
@@ -408,12 +446,170 @@ fun SettingsScreen(
             }
         )
     }
+    
+    // Edit Network Folder Dialog
+    if (showEditDialog && sourceToEdit != null) {
+        AlertDialog(
+            onDismissRequest = { 
+                showEditDialog = false
+                sourceToEdit = null
+            },
+            title = {
+                Text("Edit Network Folder")
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = editNetworkName,
+                        onValueChange = { editNetworkName = it },
+                        label = { Text("Connection Name") },
+                        placeholder = { Text("My Server") },
+                        supportingText = { Text("Display name for this connection") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    OutlinedTextField(
+                        value = editNetworkHost,
+                        onValueChange = { editNetworkHost = it },
+                        label = { Text("Host (IP Address or Hostname)") },
+                        placeholder = { Text("192.168.1.100") },
+                        supportingText = { Text("Server's IP address or hostname") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = editNetworkPath,
+                            onValueChange = { editNetworkPath = it },
+                            label = { Text("Path") },
+                            placeholder = { Text("share/folder") },
+                            supportingText = { Text("Folder path on the server") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        
+                        IconButton(
+                            onClick = { showFolderBrowser = true },
+                            enabled = editNetworkHost.isNotBlank()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Folder,
+                                contentDescription = "Browse folders"
+                            )
+                        }
+                    }
+                    
+                    OutlinedTextField(
+                        value = editNetworkUsername,
+                        onValueChange = { editNetworkUsername = it },
+                        label = { Text("Username") },
+                        placeholder = { Text("username") },
+                        supportingText = { Text("SMB/CIFS username") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    OutlinedTextField(
+                        value = editNetworkPassword,
+                        onValueChange = { editNetworkPassword = it },
+                        label = { Text("Password") },
+                        placeholder = { Text("password") },
+                        supportingText = { Text("SMB/CIFS password") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    OutlinedTextField(
+                        value = editNetworkDomain,
+                        onValueChange = { editNetworkDomain = it },
+                        label = { Text("Domain (Optional)") },
+                        placeholder = { Text("domain") },
+                        supportingText = { Text("Windows domain, if required") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = editIncludeSubfolders,
+                            onCheckedChange = { editIncludeSubfolders = it }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Include subfolders",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (editNetworkName.isNotBlank() && editNetworkHost.isNotBlank() && sourceToEdit != null) {
+                            viewModel.updateNetworkFolder(
+                                source = sourceToEdit!!,
+                                name = editNetworkName,
+                                host = editNetworkHost,
+                                path = editNetworkPath,
+                                username = editNetworkUsername,
+                                password = editNetworkPassword,
+                                domain = editNetworkDomain,
+                                includeSubfolders = editIncludeSubfolders
+                            )
+                            showEditDialog = false
+                            sourceToEdit = null
+                            // Reset edit fields
+                            editNetworkName = ""
+                            editNetworkHost = ""
+                            editNetworkPath = ""
+                            editNetworkUsername = ""
+                            editNetworkPassword = ""
+                            editNetworkDomain = ""
+                            editIncludeSubfolders = false
+                        }
+                    }
+                ) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showEditDialog = false
+                        sourceToEdit = null
+                        // Reset edit fields
+                        editNetworkName = ""
+                        editNetworkHost = ""
+                        editNetworkPath = ""
+                        editNetworkUsername = ""
+                        editNetworkPassword = ""
+                        editNetworkDomain = ""
+                        editIncludeSubfolders = false
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 
 @Composable
 fun SourceItem(
     source: MediaSource,
     civitaiUsername: String?,
+    onEdit: () -> Unit = {},
     onRemove: () -> Unit
 ) {
     Card(
@@ -465,14 +661,29 @@ fun SourceItem(
                 }
             }
             
-            IconButton(
-                onClick = onRemove
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = "Remove source",
-                    tint = MaterialTheme.colorScheme.error
-                )
+            Row {
+                // Show edit button only for network folders
+                if (source.type == SourceType.NETWORK_FOLDER) {
+                    IconButton(
+                        onClick = onEdit
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit source",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+                
+                IconButton(
+                    onClick = onRemove
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Remove source",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
             }
         }
     }

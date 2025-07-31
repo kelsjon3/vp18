@@ -13,11 +13,18 @@ import com.hierynomus.smbj.share.DiskShare
 import android.content.Context
 import com.vp18.mediaplayer.data.MediaItem
 import com.vp18.mediaplayer.data.MediaSource
+
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.Closeable
 import java.io.File
 import java.io.FileOutputStream
+
+// Direct jcifs-ng imports for testing
+import jcifs.config.PropertyConfiguration
+import jcifs.context.BaseContext
+import jcifs.smb.NtlmPasswordAuthenticator
+import jcifs.smb.SmbFile
 import java.security.MessageDigest
 import java.util.EnumSet
 
@@ -32,6 +39,12 @@ class SmbService(private val context: Context? = null) : Closeable {
     private var connection: Connection? = null
     private var session: Session? = null
     private var share: DiskShare? = null
+    
+    // Store credentials for jcifs-ng share enumeration
+    private var storedHost: String? = null
+    private var storedUsername: String? = null
+    private var storedPassword: String? = null
+    private var storedDomain: String? = null
     
     companion object {
         fun clearSmbCache(context: Context) {
@@ -53,6 +66,12 @@ class SmbService(private val context: Context? = null) : Closeable {
             println("DEBUG: MediaSource details - name: ${mediaSource.name}, host: ${mediaSource.host}, username: ${mediaSource.username}")
             println("DEBUG: Connecting to SMB server at $host")
             
+            // Store credentials for jcifs-ng share enumeration
+            storedHost = host
+            storedUsername = mediaSource.username ?: "guest"
+            storedPassword = mediaSource.password ?: ""
+            storedDomain = mediaSource.domain ?: ""
+            
             client = SMBClient()
             
             // Try to connect with the provided host (could be hostname or IP)
@@ -64,9 +83,9 @@ class SmbService(private val context: Context? = null) : Closeable {
             }
             
             val authContext = AuthenticationContext(
-                mediaSource.username ?: "guest",
-                mediaSource.password?.toCharArray() ?: charArrayOf(),
-                mediaSource.domain ?: ""
+                storedUsername!!,
+                storedPassword!!.toCharArray(),
+                storedDomain!!
             )
             
             session = connection!!.authenticate(authContext)
@@ -94,31 +113,218 @@ class SmbService(private val context: Context? = null) : Closeable {
     }
 
     suspend fun listShares(): List<SmbFolderItem> = withContext(Dispatchers.IO) {
+        println("DEBUG: SmbService.listShares() - Using DIRECT jcifs-ng approach")
+        
+        // Try the direct approach first for testing
         try {
-            println("DEBUG: Listing common SMB shares")
+            val host = storedHost ?: return@withContext emptyList()
+            val username = storedUsername ?: "guest"
+            val password = storedPassword ?: ""
+            val domain = storedDomain ?: ""
             
-            // List common share names to try
-            val commonShares = listOf("media", "share", "public", "home", "documents", "music", "videos", "pictures", "downloads")
-            val folderItems = mutableListOf<SmbFolderItem>()
+            println("DEBUG: Attempting DIRECT jcifs enumeration for $host with user $username")
+            
+            // Create simple jcifs-ng context with Nova Player settings
+            val props = java.util.Properties().apply {
+                setProperty("jcifs.smb.client.enableSMB2", "true")
+                setProperty("jcifs.smb.client.useSMB311", "true")
+                setProperty("jcifs.smb.client.useSMB2Negotiation", "false")
+                setProperty("jcifs.smb.client.ipcSigningEnforced", "false")
+                setProperty("jcifs.smb.client.disablePlainTextPasswords", "false")
+                setProperty("jcifs.smb.client.dfs.disabled", "true")
+                setProperty("jcifs.smb.useRawNTLM", "true")
+                setProperty("jcifs.resolveOrder", "DNS,BCAST")
+                setProperty("jcifs.smb.lmCompatibility", "3")
+                setProperty("jcifs.smb.client.useExtendedSecurity", "true")
+                setProperty("jcifs.smb.client.responseTimeout", "15000")
+                setProperty("jcifs.smb.client.soTimeout", "20000")
+                setProperty("jcifs.smb.client.connTimeout", "5000")
+            }
+            
+            println("DEBUG: Creating jcifs PropertyConfiguration...")
+            val config = jcifs.config.PropertyConfiguration(props)
+            println("DEBUG: Creating jcifs BaseContext...")
+            val context = jcifs.context.BaseContext(config)
+            println("DEBUG: Creating jcifs NtlmPasswordAuthenticator...")
+            val auth = jcifs.smb.NtlmPasswordAuthenticator(domain, username, password)
+            println("DEBUG: Creating auth context...")
+            val authContext = context.withCredentials(auth)
+            
+            val serverUrl = "smb://$host/"
+            println("DEBUG: Creating SmbFile for: $serverUrl")
+            val serverFile = jcifs.smb.SmbFile(serverUrl, authContext)
+            
+            println("DEBUG: Calling serverFile.listFiles()...")
+            val jcifsShares = serverFile.listFiles()
+            println("DEBUG: jcifs listFiles() returned ${jcifsShares?.size ?: 0} items")
+            
+            val shares = mutableListOf<SmbFolderItem>()
+            jcifsShares?.forEach { share ->
+                try {
+                    val shareName = share.name.removeSuffix("/")
+                    println("DEBUG: Processing share: $shareName, isDirectory: ${share.isDirectory}")
+                    
+                    if (share.isDirectory && !isAdministrativeShare(shareName)) {
+                        shares.add(SmbFolderItem(shareName, true, shareName))
+                        println("DEBUG: ✓ Added share: $shareName")
+                    } else {
+                        println("DEBUG: ✗ Skipped share: $shareName")
+                    }
+                } catch (e: Exception) {
+                    println("DEBUG: Error processing share: ${e.message}")
+                }
+            }
+            
+            println("DEBUG: Final result: ${shares.size} accessible shares")
+            return@withContext if (shares.isNotEmpty()) shares else listSharesWithFallback()
+            
+        } catch (e: Exception) {
+            println("DEBUG: DIRECT enumeration failed: ${e.javaClass.simpleName}")
+            println("DEBUG: Exception message: ${e.message}")
+            e.printStackTrace()
+            return@withContext listSharesWithFallback()
+        }
+    }
+    
+    private fun isAdministrativeShare(shareName: String): Boolean {
+        return shareName.endsWith("$") || 
+               shareName.equals("IPC", ignoreCase = true) ||
+               shareName.equals("ADMIN", ignoreCase = true) ||
+               shareName.equals("print$", ignoreCase = true) ||
+               shareName.equals("NETLOGON", ignoreCase = true) ||
+               shareName.equals("SYSVOL", ignoreCase = true)
+    }
+    
+    /**
+     * Create a special URL that indicates this SMB file should be cached on-demand
+     */
+    private fun createCacheableUrl(smbUrl: String, filePath: String): String {
+        // Create a special format that indicates it needs caching
+        return "smb-cache://$smbUrl|$filePath"
+    }
+    
+    /**
+     * Load an image URL, handling on-demand caching if needed
+     * Call this from image loading components
+     */
+    suspend fun loadImageUrl(imageUrl: String): String? = withContext(Dispatchers.IO) {
+        return@withContext if (imageUrl.startsWith("smb-cache://")) {
+            // Large image that needs on-demand caching
+            cacheFileOnDemand(imageUrl)
+        } else {
+            // Already cached or regular URL
+            imageUrl
+        }
+    }
+    
+    /**
+     * Cache a file on-demand when it's actually needed for playback or display
+     * Call this when the user wants to play a file or display a large image
+     */
+    suspend fun cacheFileOnDemand(cacheableUrl: String): String? = withContext(Dispatchers.IO) {
+        try {
+            if (!cacheableUrl.startsWith("smb-cache://")) {
+                println("DEBUG: Not a cacheable URL: $cacheableUrl")
+                return@withContext cacheableUrl // Return as-is if not a special URL
+            }
+            
+            // Parse the special URL format
+            val urlData = cacheableUrl.removePrefix("smb-cache://")
+            val parts = urlData.split("|")
+            if (parts.size != 2) {
+                println("DEBUG: Invalid cacheable URL format: $cacheableUrl")
+                return@withContext null
+            }
+            
+            val smbUrl = parts[0]
+            val filePath = parts[1]
+            
+            println("DEBUG: Caching file on-demand: $filePath")
+            return@withContext downloadAndCacheFile(smbUrl, filePath)
+            
+        } catch (e: Exception) {
+            println("DEBUG: Failed to cache file on-demand: ${e.message}")
+            return@withContext null
+        }
+    }
+    
+    private suspend fun listSharesWithFallback(): List<SmbFolderItem> = withContext(Dispatchers.IO) {
+        println("DEBUG: ==> ENTERED FALLBACK METHOD - listSharesWithFallback()")
+        println("DEBUG: Executing fallback share enumeration strategies")
+        
+        // Strategy 1: Try common share names
+        val commonShares = listOf("media", "share", "shared", "public", "home", "users", "documents", "downloads")
+        val discoveredShares = mutableListOf<SmbFolderItem>()
+        
+        try {
+            val currentSession = session ?: return@withContext emptyList()
             
             for (shareName in commonShares) {
-                folderItems.add(
+                try {
+                    println("DEBUG: Testing common share: $shareName")
+                    val testConnection = currentSession.connectShare(shareName)
+                    testConnection.close()
+                    
+                    discoveredShares.add(
+                        SmbFolderItem(
+                            name = shareName,
+                            isDirectory = true,
+                            path = shareName
+                        )
+                    )
+                    println("DEBUG: ✓ Confirmed share: $shareName")
+                    
+                    if (discoveredShares.size >= 5) break // Limit to prevent excessive testing
+                } catch (e: Exception) {
+                    // Share doesn't exist or not accessible
+                }
+            }
+            
+            return@withContext if (discoveredShares.isNotEmpty()) {
+                discoveredShares.add(0, SmbFolderItem(
+                    name = "--- Discovered shares ---",
+                    isDirectory = false,
+                    path = ""
+                ))
+                discoveredShares.sortedBy { if (it.name.startsWith("---")) "" else it.name }
+            } else {
+                listOf(
                     SmbFolderItem(
-                        name = shareName,
-                        isDirectory = true,
-                        path = shareName
+                        name = "No shares found",
+                        isDirectory = false,
+                        path = ""
+                    ),
+                    SmbFolderItem(
+                        name = "Try entering share name manually",
+                        isDirectory = false,
+                        path = ""
+                    ),
+                    SmbFolderItem(
+                        name = "Check server credentials and network",
+                        isDirectory = false,
+                        path = ""
                     )
                 )
             }
             
-            println("DEBUG: Listed ${folderItems.size} common SMB shares")
-            folderItems.sortedBy { it.name }
         } catch (e: Exception) {
-            println("DEBUG: Failed to list SMB shares: ${e.message}")
-            e.printStackTrace()
-            emptyList()
+            println("DEBUG: Fallback enumeration also failed: ${e.message}")
+            return@withContext listOf(
+                SmbFolderItem(
+                    name = "Share discovery failed",
+                    isDirectory = false,
+                    path = ""
+                ),
+                SmbFolderItem(
+                    name = "Error: ${e.message?.take(40) ?: "Connection failed"}",
+                    isDirectory = false,
+                    path = ""
+                )
+            )
         }
     }
+    
+
 
     suspend fun connectToShare(shareName: String): Boolean = withContext(Dispatchers.IO) {
         try {
@@ -243,19 +449,44 @@ class SmbService(private val context: Context? = null) : Closeable {
                     val filePath = if (folderPath.isEmpty()) file.fileName else "$folderPath/${file.fileName}"
                     val smbUrl = "smb://${mediaSource.host}/$shareName/$filePath"
                     
-                    // Download and cache the file, or use existing cache
-                    val cachedUrl = downloadAndCacheFile(smbUrl, filePath)
+                    println("DEBUG: Found media file: ${file.fileName}")
                     
-                    println("DEBUG: File: ${file.fileName}, Cached URL: $cachedUrl")
+                    val fileType = getFileType(file.fileName)
+                    val isVideo = fileType == "Video"
+                    val isImage = fileType == "Image"
                     
-                    val isVideo = getFileType(file.fileName) == "Video"
+                    // Get file size for smart caching decisions
+                    val fileSize = try { file.endOfFile } catch (e: Exception) { 0L }
+                    val isSmallImage = isImage && fileSize < 10 * 1024 * 1024 // 10MB limit for smoother scrolling
+                    
+                    println("DEBUG: File: ${file.fileName}, Type: $fileType, Size: ${fileSize}B, SmallImage: $isSmallImage")
+                    
+                    // Smart caching strategy:
+                    // - Small images: Cache immediately for instant display
+                    // - Large images & videos: Use on-demand caching
+                    val imageUrl = when {
+                        isVideo -> "https://via.placeholder.com/400x600/cccccc/666666?text=Video+File"
+                        isSmallImage -> {
+                            // Cache small images immediately
+                            downloadAndCacheFile(smbUrl, filePath) 
+                                ?: "https://via.placeholder.com/400x600/cccccc/666666?text=Loading..."
+                        }
+                        isImage -> {
+                            // Large images use on-demand caching
+                            createCacheableUrl(smbUrl, filePath)
+                        }
+                        else -> "https://via.placeholder.com/400x600/cccccc/666666?text=Unknown"
+                    }
+                    
+                    val videoUrl = if (isVideo) createCacheableUrl(smbUrl, filePath) else null
+                    
                     val mediaItem = MediaItem(
                         id = "smb_${mediaSource.id}_${filePath.replace("/", "_")}",
                         title = file.fileName,
-                        imageUrl = if (isVideo) "https://via.placeholder.com/400x600/cccccc/666666?text=Video+Thumbnail" else (cachedUrl ?: "https://via.placeholder.com/400x600/cccccc/666666?text=Image+Not+Available"),
-                        videoUrl = if (isVideo) cachedUrl else null,
+                        imageUrl = imageUrl,
+                        videoUrl = videoUrl,
                         creator = "Network",
-                        type = getFileType(file.fileName),
+                        type = fileType,
                         source = mediaSource
                     )
                     
@@ -288,25 +519,49 @@ class SmbService(private val context: Context? = null) : Closeable {
                     // It's a directory, recurse into it
                     scanFolderRecursively(share, filePath, mediaSource, mediaItems)
                 } else if (isMediaFile(file.fileName)) {
-                    // It's a media file
-                    // Extract share name from mediaSource.path
+                    // It's a media file - smart caching strategy
                     val selectedPath = mediaSource.path ?: ""
                     val shareName = selectedPath.split("/").firstOrNull() ?: ""
                     val smbUrl = "smb://${mediaSource.host}/$shareName/$filePath"
                     
-                    // Download and cache the file, or use existing cache
-                    val cachedUrl = downloadAndCacheFile(smbUrl, filePath)
+                    println("DEBUG: Found media file: ${file.fileName}")
                     
-                    println("DEBUG: File: ${file.fileName}, Cached URL: $cachedUrl")
+                    val fileType = getFileType(file.fileName)
+                    val isVideo = fileType == "Video"
+                    val isImage = fileType == "Image"
                     
-                    val isVideo = getFileType(file.fileName) == "Video"
+                    // Get file size for smart caching decisions
+                    val fileSize = try { file.endOfFile } catch (e: Exception) { 0L }
+                    val isSmallImage = isImage && fileSize < 10 * 1024 * 1024 // 10MB limit for smoother scrolling
+                    
+                    println("DEBUG: File: ${file.fileName}, Type: $fileType, Size: ${fileSize}B, SmallImage: $isSmallImage")
+                    
+                    // Smart caching strategy:
+                    // - Small images: Cache immediately for instant display
+                    // - Large images & videos: Use on-demand caching
+                    val imageUrl = when {
+                        isVideo -> "https://via.placeholder.com/400x600/cccccc/666666?text=Video+File"
+                        isSmallImage -> {
+                            // Cache small images immediately
+                            downloadAndCacheFile(smbUrl, filePath) 
+                                ?: "https://via.placeholder.com/400x600/cccccc/666666?text=Loading..."
+                        }
+                        isImage -> {
+                            // Large images use on-demand caching
+                            createCacheableUrl(smbUrl, filePath)
+                        }
+                        else -> "https://via.placeholder.com/400x600/cccccc/666666?text=Unknown"
+                    }
+                    
+                    val videoUrl = if (isVideo) createCacheableUrl(smbUrl, filePath) else null
+                    
                     val mediaItem = MediaItem(
                         id = "smb_${mediaSource.id}_${filePath.replace("/", "_")}",
                         title = file.fileName,
-                        imageUrl = if (isVideo) "https://via.placeholder.com/400x600/cccccc/666666?text=Video+Thumbnail" else (cachedUrl ?: "https://via.placeholder.com/400x600/cccccc/666666?text=Image+Not+Available"),
-                        videoUrl = if (isVideo) cachedUrl else null,
+                        imageUrl = imageUrl,
+                        videoUrl = videoUrl,
                         creator = "Network",
-                        type = getFileType(file.fileName),
+                        type = fileType,
                         source = mediaSource
                     )
                     
@@ -353,7 +608,7 @@ class SmbService(private val context: Context? = null) : Closeable {
     
     private suspend fun downloadAndCacheFile(smbUrl: String, filePath: String): String? = withContext(Dispatchers.IO) {
         try {
-            println("DEBUG: Starting download for: $filePath")
+            println("DEBUG: Starting on-demand cache for: $filePath")
             println("DEBUG: SMB URL: $smbUrl")
 
             val androidContext = context ?: return@withContext null
@@ -363,6 +618,23 @@ class SmbService(private val context: Context? = null) : Closeable {
             if (!cacheDir.exists()) {
                 cacheDir.mkdirs()
                 println("DEBUG: Created cache directory: ${cacheDir.absolutePath}")
+            }
+            
+            // Check available space before caching
+            val freeSpace = cacheDir.freeSpace
+            val cacheDirSize = getCacheDirSize(cacheDir)
+            val maxCacheSize = 500 * 1024 * 1024L // 500MB max cache
+            
+            println("DEBUG: Cache dir size: ${cacheDirSize / 1024 / 1024}MB, Free space: ${freeSpace / 1024 / 1024}MB")
+            
+            if (cacheDirSize > maxCacheSize) {
+                println("DEBUG: Cache size limit exceeded, cleaning old files...")
+                cleanOldCacheFiles(cacheDir)
+            }
+            
+            if (freeSpace < 100 * 1024 * 1024) { // Need at least 100MB free
+                println("DEBUG: Insufficient free space for caching")
+                return@withContext null
             }
 
             // Create unique filename based on SMB URL
@@ -417,8 +689,50 @@ class SmbService(private val context: Context? = null) : Closeable {
             e.printStackTrace()
             null
         }
+        }
+    
+    /**
+     * Calculate total size of cache directory
+     */
+    private fun getCacheDirSize(cacheDir: File): Long {
+        return try {
+            cacheDir.walkTopDown()
+                .filter { it.isFile }
+                .map { it.length() }
+                .sum()
+        } catch (e: Exception) {
+            println("DEBUG: Error calculating cache size: ${e.message}")
+            0L
+        }
     }
-
+    
+    /**
+     * Clean old cache files when cache size limit is exceeded
+     */
+    private fun cleanOldCacheFiles(cacheDir: File) {
+        try {
+            val files = cacheDir.listFiles() ?: return
+            val sortedFiles = files.filter { it.isFile && it.name.startsWith("smb_") }
+                .sortedBy { it.lastModified() } // Oldest first
+            
+            // Remove oldest 30% of files
+            val filesToDelete = sortedFiles.take((sortedFiles.size * 0.3).toInt())
+            
+            println("DEBUG: Cleaning ${filesToDelete.size} old cache files")
+            filesToDelete.forEach { file ->
+                try {
+                    if (file.delete()) {
+                        println("DEBUG: Deleted old cache file: ${file.name}")
+                    }
+                } catch (e: Exception) {
+                    println("DEBUG: Failed to delete cache file ${file.name}: ${e.message}")
+                }
+            }
+        } catch (e: Exception) {
+            println("DEBUG: Error cleaning cache: ${e.message}")
+        }
+    }
+    
     override fun close() {
         try {
             share?.close()
@@ -432,6 +746,12 @@ class SmbService(private val context: Context? = null) : Closeable {
             session = null
             connection = null
             client = null
+            
+            // Clear stored credentials
+            storedHost = null
+            storedUsername = null
+            storedPassword = null
+            storedDomain = null
         }
     }
 }

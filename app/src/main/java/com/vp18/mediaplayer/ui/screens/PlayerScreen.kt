@@ -3,7 +3,14 @@ package com.vp18.mediaplayer.ui.screens
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.material3.Text
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -79,13 +86,30 @@ fun PlayerScreen(
     
     LaunchedEffect(currentIndex) {
         if (currentIndex != pagerState.currentPage) {
-            pagerState.animateScrollToPage(currentIndex)
+            pagerState.animateScrollToPage(
+                page = currentIndex,
+                animationSpec = tween(195) // 35% faster than default (300ms -> 195ms)
+            )
         }
     }
     
     LaunchedEffect(pagerState) {
         snapshotFlow { pagerState.currentPage }.collect { page ->
             viewModel.setCurrentMediaIndex(page)
+            
+            // Look-ahead caching: Pre-cache next 3 images for smoother scrolling
+            coroutineScope.launch {
+                val itemsToPreCache = listOf(page + 1, page + 2, page + 3, page - 1, page - 2)
+                    .filter { it >= 0 && it < currentItems.size }
+                
+                itemsToPreCache.forEach { index ->
+                    val item = currentItems[index]
+                    if (item.type == "Image" && item.imageUrl.startsWith("smb-cache://")) {
+                        // Pre-cache this image in background
+                        viewModel.preCacheImage(item.imageUrl)
+                    }
+                }
+            }
         }
     }
     
@@ -161,6 +185,7 @@ fun PlayerScreen(
             ) { page ->
                 MediaItemView(
                     mediaItem = currentItems[page],
+                    viewModel = viewModel,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -242,18 +267,71 @@ fun PlayerScreen(
 @Composable
 fun MediaItemView(
     mediaItem: MediaItem,
+    viewModel: MediaViewModel,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val imageLoader = ImageLoader(context)
+    var cachedVideoUrl by remember(mediaItem.id) { mutableStateOf<String?>(null) }
+    var isLoadingVideo by remember(mediaItem.id) { mutableStateOf(false) }
+    
+    // Handle SMB video caching
+    LaunchedEffect(mediaItem.videoUrl) {
+        if (mediaItem.isVideo && mediaItem.videoUrl?.startsWith("smb-cache://") == true) {
+            isLoadingVideo = true
+            try {
+                cachedVideoUrl = viewModel.cacheFileOnDemand(mediaItem.videoUrl!!)
+                println("DEBUG: Video cached successfully: $cachedVideoUrl")
+            } catch (e: Exception) {
+                println("DEBUG: Video caching failed: ${e.message}")
+                cachedVideoUrl = null
+            } finally {
+                isLoadingVideo = false
+            }
+        } else {
+            cachedVideoUrl = mediaItem.videoUrl
+        }
+    }
+    
     Box(
         modifier = modifier
     ) {
         if (mediaItem.isVideo) {
-            VideoPlayer(
-                videoUrl = mediaItem.videoUrl ?: mediaItem.imageUrl,
-                modifier = Modifier.fillMaxSize()
-            )
+            if (isLoadingVideo || cachedVideoUrl == null) {
+                // Show loading while caching video
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color.Black),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = Color.White)
+                    Text(
+                        text = "Preparing video...",
+                        color = Color.White,
+                        modifier = Modifier.padding(top = 16.dp)
+                    )
+                }
+            } else {
+                cachedVideoUrl?.let { url ->
+                    VideoPlayer(
+                        videoUrl = url,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } ?: run {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color.Black),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Video not available",
+                            color = Color.White
+                        )
+                    }
+                }
+            }
         } else {
             AsyncImage(
                 model = mediaItem.imageUrl,

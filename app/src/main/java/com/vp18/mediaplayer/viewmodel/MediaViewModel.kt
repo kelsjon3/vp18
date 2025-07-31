@@ -105,6 +105,32 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
         }
     }
     
+    /**
+     * Pre-cache an image in the background for smoother scrolling
+     */
+    fun preCacheImage(imageUrl: String) {
+        viewModelScope.launch {
+            try {
+                repository.preCacheImage(imageUrl)
+            } catch (e: Exception) {
+                // Silently fail for pre-caching to avoid disrupting UX
+                println("DEBUG: Pre-cache failed for $imageUrl: ${e.message}")
+            }
+        }
+    }
+    
+    /**
+     * Cache a file on-demand (for videos that need to be played)
+     */
+    suspend fun cacheFileOnDemand(fileUrl: String): String? {
+        return try {
+            repository.cacheFileOnDemand(fileUrl)
+        } catch (e: Exception) {
+            println("DEBUG: Cache file on-demand failed for $fileUrl: ${e.message}")
+            null
+        }
+    }
+    
     fun addCivitaiSource(apiKey: String) {
         viewModelScope.launch {
             repository.saveCivitaiApiKey(apiKey)
@@ -176,6 +202,36 @@ class MediaViewModel(private val repository: MediaRepository) : ViewModel() {
     fun removeSource(source: MediaSource) {
         viewModelScope.launch {
             repository.removeSource(source)
+        }
+    }
+    
+    fun updateNetworkFolder(
+        source: MediaSource,
+        name: String,
+        host: String,
+        path: String,
+        username: String,
+        password: String,
+        domain: String = "",
+        includeSubfolders: Boolean = false
+    ) {
+        viewModelScope.launch {
+            val updatedSource = source.copy(
+                name = name,
+                host = host,
+                path = path,
+                username = username,
+                password = password,
+                domain = domain,
+                includeSubfolders = includeSubfolders
+            )
+            
+            // Update the source
+            repository.updateSource(updatedSource)
+            
+            // Update credentials using the same sourceString format
+            val sourceString = "${updatedSource.type.name}:${updatedSource.name}:${updatedSource.path ?: ""}:${updatedSource.includeSubfolders}"
+            repository.saveSmbCredentials(sourceString, host, username, password, domain)
         }
     }
     

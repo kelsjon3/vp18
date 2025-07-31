@@ -34,3 +34,13 @@
 -keep class * implements com.google.gson.TypeAdapterFactory
 -keep class * implements com.google.gson.JsonSerializer
 -keep class * implements com.google.gson.JsonDeserializer
+
+# jcifs-ng library protection
+-keep class jcifs.** { *; }
+-keep class eu.agno3.jcifs.** { *; }
+-dontwarn jcifs.**
+-dontwarn eu.agno3.jcifs.**
+
+# SLF4J logging protection
+-keep class org.slf4j.** { *; }
+-dontwarn org.slf4j.**
